@@ -1,0 +1,5 @@
+{
+  "name": "token-graph",
+  "owner": { "name": "1celo12" },
+  "plugins": [{ "name": "token-graph", "source": "./" }]
+}
