@@ -1,4 +1,4 @@
-import type { On } from 'claude-code'
+import type { On, RenderSurface } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 
 import type { Bucket, Point, Summary } from '../types'
@@ -41,13 +41,21 @@ const PANE = {
 
 // How many times the mod ran the scanner, across the test running now.
 const scans = { count: 0 }
+// The surfaces attached now, and how many times the mod opened the pane.
+const roster = { surfaces: ['desktop'] as RenderSurface[], opens: 0 }
 
 // Stands in for the engine and for scripts/scan.mjs.
 function engine(on: On, stdout: string, exitCode = 0, stored: Record<string, unknown> = {}) {
   const clock = mock.clock(on, { now: NOW })
   mock.store(on, stored)
   on('command.register', () => ({ value: { command: 'tokens' } }))
-  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('session.attach', (_, e) => ({ clientId: e.clientId }))
+  on('session.surfaces', () => ({ value: [...roster.surfaces] }))
+  on('ui.open', () => {
+    if (roster.surfaces.length === 0) throw new Error('no-surface: no surface is attached')
+    roster.opens++
+    return { value: { isPlaced: true } }
+  })
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('process.run', () => ({
     value: {
@@ -191,4 +199,19 @@ test('the page chosen in an earlier session is where the pane starts', async ($,
   // 30 days of input 1 each.
   expect((await ui.find({ type: 'Text', text: /last 30 days/ }))?.text).toContain('in 30')
   await ui.unmount()
+})
+
+test('with no surface at start, the pane opens when the app attaches', async ($, on) => {
+  roster.surfaces = []
+  roster.opens = 0
+  const clock = engine(on, JSON.stringify(SUMMARY))
+  await $.session.start({ cwd: '/', surface: null, isInteractive: true })
+  await clock.settle()
+  expect(roster.opens).toBe(0)
+
+  roster.surfaces = ['desktop']
+  await $.session.attach({ surface: 'desktop', clientId: 'desktop:default' })
+  await clock.settle()
+  expect(roster.opens).toBe(1)
+  roster.surfaces = ['desktop']
 })

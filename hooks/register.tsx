@@ -419,9 +419,28 @@ async function refresh($: EngineInterface, isAsked = false): Promise<void> {
   }
 }
 
+/**
+ * Opens the pane where a surface draws. At session start the desktop app may
+ * not have attached yet, so this waits for `session.attach` instead of failing.
+ */
+async function openPane($: EngineInterface): Promise<void> {
+  if ((await $.session.surfaces()).length === 0) return
+  try {
+    await $.ui.open({ id: PANE, title: 'Tokens' })
+  } catch {
+    // No surface after all: session.attach opens it once one joins.
+  }
+}
+
 // ---------------------------------------------------------------- hooks
 
 export const register: Register = on => {
+  on('session.attach', async ($, e, next) => {
+    const attached = await next(e)
+    await openPane($)
+    return attached
+  })
+
   on('session.start', async ($, e, next) => {
     const started = await next(e)
 
@@ -436,7 +455,7 @@ export const register: Register = on => {
     if (page && PAGES.some(p => p.id === page)) await update($, pageAtom, () => page)
     if (metric && METRICS.some(m => m.id === metric)) await update($, metricAtom, () => metric)
 
-    void $.ui.open({ id: PANE, title: 'Tokens' })
+    void openPane($)
     void refresh($)
     $.clock.every(REFRESH_MS, () => void refresh($))
 
@@ -444,10 +463,14 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'tokens' }, async $ => {
-    const opened = await $.ui.open({ id: PANE, title: 'Tokens', focus: true })
     void refresh($, true)
-
-    return { text: opened.isPlaced ? 'Token graph opened.' : `Token graph waits: ${opened.reason}` }
+    try {
+      const opened = await $.ui.open({ id: PANE, title: 'Tokens', focus: true })
+      return { text: opened.isPlaced ? 'Token graph opened.' : `Token graph waits: ${opened.reason}` }
+    } catch (err) {
+      const why = err instanceof Error ? err.message : String(err)
+      return { text: `The token graph can't open here yet (${why}). Try /tokens again in a moment.` }
+    }
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
